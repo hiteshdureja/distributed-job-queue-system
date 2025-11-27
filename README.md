@@ -120,7 +120,7 @@ curl -X POST http://127.0.0.1:8000/api/requeue/YOUR-JOB-ID/ \
 ```
 
 
-## 📐 Design Trade-offs
+### A. Design Trade-offs
 
 This prototype prioritizes simplicity and using the **database as the single source of truth** for all queue state. This involved key architectural trade-offs compared to production systems:
 
@@ -130,3 +130,14 @@ This prototype prioritizes simplicity and using the **database as the single sou
 | **Job Polling** | **Busy-Wait Worker Loop** (`while True: sleep(2)`) | **Rationale:** Simple to implement using a custom Django Management Command. **Alternative:** Production workers should be **event-driven** (e.g., consuming SQS/Kafka messages) or use **Long Polling** to avoid continuously hitting the database. |
 | **Rate Limiting** | **Database Lookups** (Querying recent jobs) | **Rationale:** Simplified implementation by centralizing state in the existing DB. **Alternative:** For performance, rate limits should be enforced using a dedicated, low-latency store like **Redis** for fast lookups (e.g., using the Sliding Window Log technique). |
 | **DLQ Implementation** | **DB Status Field** (`status='FAILED'`) | **Rationale:** Highly simplified monitoring and re-queueing (just an `UPDATE` command). **Alternative:** A true DLQ would be a separate, isolated queue that requires explicit movement of messages, ensuring failed data is logically separated from active jobs. |
+
+### B. Auto-Scaling Workers (Conceptual Plan)
+
+To achieve true distributed scalability, an external mechanism would dynamically adjust the number of worker instances based on queue load.
+
+| Component | Policy/Metric | Action |
+| :--- | :--- | :--- |
+| **Scaling Metric** | The number of jobs with `status='PENDING'`. | This is the primary indicator of queue backlog/demand. |
+| **Scaler Service** | A dedicated service polls the DB for the PENDING job count and interacts with the orchestrator. | Executes the scale-up/scale-down commands. |
+| **Scale Up Threshold** | `PENDING Jobs > 10` **and** `Workers < Max (e.g., 50)`. | **Deploy 1-2 new worker instances** via the orchestrator (e.g., Kubernetes HPA).  |
+| **Scale Down Threshold**| `PENDING Jobs = 0` **for** `5 consecutive minutes`. | **Terminate 1 worker instance** to reduce operational costs. |
