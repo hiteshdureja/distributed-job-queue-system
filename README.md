@@ -20,7 +20,7 @@ This project is a simplified, fault-tolerant job queue system built on Django an
 ### Step 1: Clone the Repository and Setup Environment
 
 ```bash
-git clone [https://github.com/hiteshdureja/distributed-job-queue-system.git](distributed-job-queue-system.git)
+git clone https://github.com/hiteshdureja/distributed-job-queue-system.git
 cd distributed-job-queue-system
 
 python3 -m venv venv
