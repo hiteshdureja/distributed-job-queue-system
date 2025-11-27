@@ -30,7 +30,7 @@ source venv/bin/activate
 ### Step 2: Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install Django
 ```
 
 ### Step 3: Database Migration
@@ -79,7 +79,7 @@ You can submit jobs via the API. The `duration` key simulates the work time (in 
 #### 1. Successful Job
 
 ```bash
-curl -X POST [http://127.0.0.1:8000/api/submit/](http://127.0.0.1:8000/api/submit/) \
+curl -X POST http://127.0.0.1:8000/api/submit/ \
      -H "Content-Type: application/json" \
      -d '{"user_id": "alice", "payload": {"duration": 5}}'
 ```
@@ -89,7 +89,7 @@ curl -X POST [http://127.0.0.1:8000/api/submit/](http://127.0.0.1:8000/api/submi
 Include `"fail_simulation": true` to force the worker to raise an exception. It will retry the task **3 times** before setting the status to `FAILED` and moving it to the DLQ.
 
 ```bash
-curl -X POST [http://127.0.0.1:8000/api/submit/](http://127.0.0.1:8000/api/submit/) \
+curl -X POST http://127.0.0.1:8000/api/submit/ \
      -H "Content-Type: application/json" \
      -d '{"user_id": "bob", "payload": {"fail_simulation": true, "duration": 1}}'
 ```
@@ -100,7 +100,7 @@ Use the `job_id` returned from the submission command to check the status.
 
 ```bash
 # Replace the UUID with your actual Job ID
-curl [http://127.0.0.1:8000/api/status/YOUR-JOB-ID-UUID/](http://127.0.0.1:8000/api/status/YOUR-JOB-ID-UUID/)
+curl http://127.0.0.1:8000/api/status/YOUR-JOB-ID-UUID/
 ```
 
 ### D. DLQ Management (Re-queue via API)
@@ -108,13 +108,13 @@ curl [http://127.0.0.1:8000/api/status/YOUR-JOB-ID-UUID/](http://127.0.0.1:8000/
 You can manually trigger actions on jobs in the `FAILED` or `COMPLETED` state (the dashboard uses these endpoints).
 
 ```bash
-curl -X POST [http://127.0.0.1:8000/api/requeue/YOUR-JOB-ID/](http://127.0.0.1:8000/api/requeue/YOUR-JOB-ID/) \
+curl -X POST http://127.0.0.1:8000/api/requeue/YOUR-JOB-ID/ \
      -H "Content-Type: application/json" \
      -d '{"action": "REQUEUE"}'
 ```
 
 ```bash
-curl -X POST [http://127.0.0.1:8000/api/requeue/YOUR-JOB-ID/](http://127.0.0.1:8000/api/requeue/YOUR-JOB-ID/) \
+curl -X POST http://127.0.0.1:8000/api/requeue/YOUR-JOB-ID/ \
      -H "Content-Type: application/json" \
      -d '{"action": "FORCE_SUCCESS"}'
 ```
