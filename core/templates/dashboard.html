@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Job Queue Dashboard</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        h1,
+        h2 {
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+
+        .card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px;
+            display: inline-block;
+            width: 150px;
+            text-align: center;
+        }
+
+        .status-PENDING {
+            background: #f0f0f0;
+        }
+
+        .status-RUNNING {
+            background: #fff3cd;
+        }
+
+        .status-COMPLETED {
+            background: #d4edda;
+        }
+
+        .status-FAILED {
+            background: #f8d7da;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        #task-form {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        #task-form input,
+        #task-form textarea {
+            width: 98%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        #task-form button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        #message {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        .dlq-table td {
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Distributed Task Queue Dashboard</h1>
+
+    <h2>Submit New Task</h2>
+    <div id="task-form">
+        <label for="user_id">User ID (for Quota/Rate Limit):</label>
+        <input type="text" id="user_id" value="default_user" required>
+
+        <label for="idempotency_key">Idempotency Key (Optional):</label>
+        <input type="text" id="idempotency_key" placeholder="Unique ID to prevent duplicates">
+
+        <label for="payload">Payload (JSON):</label>
+        <textarea id="payload" rows="3" placeholder='{"duration": 5}'>{"duration": 5}</textarea>
+
+        <button onclick="submitTask()">Submit Job</button>
+        <div id="message"></div>
+    </div>
+
+    <h2>Queue Status</h2>
+    <div id="stats">
+    </div>
+
+    <h2>Dead Letter Queue (DLQ)</h2>
+    <table class="dlq-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>User</th>
+                <th>Retries</th>
+                <th>Failed Reason</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="dlq-table"></tbody>
+    </table>
+
+    <h3>Recent Jobs (Paginated)</h3>
+    <div id="pagination-controls" style="margin-bottom: 15px;">
+        <button id="prev-button" onclick="changePage(-1)" disabled>Previous</button>
+        <span id="page-info" data-total-pages="1">Page 1 of 1</span>
+        <button id="next-button" onclick="changePage(1)" disabled>Next</button>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>User</th>
+                <th>Status</th>
+                <th>Retries</th>
+                <th>Created At</th>
+            </tr>
+        </thead>
+        <tbody id="job-table"></tbody>
+    </table>
+
+    <script>
+        let currentPage = 1;
+
+        async function changePage(step) {
+            const totalPages = parseInt(document.getElementById('page-info').dataset.totalPages);
+            const nextPage = currentPage + step;
+
+            if (nextPage < 1 || nextPage > totalPages) {
+                return;
+            }
+
+            currentPage = nextPage;
+            await updateDashboard();
+        }
+
+        function updatePaginationControls(pagination) {
+            const prevButton = document.getElementById('prev-button');
+            const nextButton = document.getElementById('next-button');
+            const pageInfo = document.getElementById('page-info');
+
+            prevButton.disabled = !pagination.has_previous;
+            nextButton.disabled = !pagination.has_next;
+            pageInfo.textContent = `Page ${pagination.current_page} of ${pagination.total_pages}`;
+            pageInfo.dataset.totalPages = pagination.total_pages;
+            currentPage = pagination.current_page;
+        }
+
+        async function submitTask() {
+            const userId = document.getElementById('user_id').value;
+            const idemKey = document.getElementById('idempotency_key').value;
+            const payloadText = document.getElementById('payload').value;
+            const messageDiv = document.getElementById('message');
+
+            try {
+                const payload = JSON.parse(payloadText);
+                const data = { user_id: userId, payload: payload };
+                if (idemKey) { data.idempotency_key = idemKey; }
+
+                messageDiv.textContent = 'Submitting...';
+                messageDiv.style.color = 'gray';
+
+                const response = await fetch('/api/submit/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok || response.status === 201) {
+                    messageDiv.textContent = `SUCCESS! Job ID: ${result.job_id}. Status: ${result.status}`;
+                    messageDiv.style.color = 'green';
+                    updateDashboard();
+                } else {
+                    messageDiv.textContent = `ERROR (${response.status}): ${result.error || JSON.stringify(result)}`;
+                    messageDiv.style.color = 'red';
+                }
+
+            } catch (e) {
+                messageDiv.textContent = 'ERROR: Invalid JSON in payload or network issue.';
+                messageDiv.style.color = 'red';
+                console.error(e);
+            }
+        }
+
+        async function performAction(jobId, action) {
+            if (!confirm(`Are you sure you want to perform action: ${action} on Job ID ${jobId.substring(0, 8)}...?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/requeue/${jobId}/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: action })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`Success: Job ${jobId.substring(0, 8)} set to ${result.status}. ${result.message}`);
+                    updateDashboard();
+                } else {
+                    alert(`Error: ${result.error}`);
+                }
+            } catch (e) {
+                console.error("Action failed:", e);
+                alert('A network or server error occurred.');
+            }
+        }
+
+        async function updateDashboard() {
+            const response = await fetch(`/api/stats/?page=${currentPage}`);
+            const data = await response.json();
+            const statsDiv = document.getElementById('stats');
+            statsDiv.innerHTML = '';
+            const statuses = ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED'];
+
+            statuses.forEach(status => {
+                const count = data.counts[status] || 0;
+                statsDiv.innerHTML += `
+                    <div class="card status-${status}">
+                        <h3>${count}</h3>
+                        <p>${status}</p>
+                    </div>
+                `;
+            });
+            updatePaginationControls(data.pagination);
+            const recentTable = document.getElementById('job-table');
+            recentTable.innerHTML = '';
+            const dlqTable = document.getElementById('dlq-table');
+            dlqTable.innerHTML = '';
+            data.jobs.forEach(job => {
+                const date = new Date(job.created_at).toLocaleTimeString();
+                const shortId = job.id.substring(0, 8);
+                recentTable.innerHTML += `
+                    <tr>
+                        <td>${shortId}...</td>
+                        <td>${job.user_id}</td>
+                        <td class="status-${job.status}">${job.status}</td>
+                        <td>${job.retry_count}</td>
+                        <td>${date}</td>
+                    </tr>
+                `;
+
+                if (job.status === 'FAILED') {
+                    dlqTable.innerHTML += `
+                        <tr class="status-FAILED">
+                            <td>${shortId}...</td>
+                            <td>${job.user_id}</td>
+                            <td>${job.retry_count}</td>
+                            <td>${job.log_output}</td>
+                            <td>
+                                <button onclick="performAction('${job.id}', 'REQUEUE')">Re-queue</button>
+                                <button onclick="performAction('${job.id}', 'FORCE_SUCCESS')">Mark Success</button>
+                            </td>
+                        </tr>
+                    `;
+                }
+            });
+        }
+
+        setInterval(updateDashboard, 2000);
+
+        updateDashboard();
+    </script>
+</body>
+
+</html>
